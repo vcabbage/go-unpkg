@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/vcabbage/unpkg/cmd/unpkg/cli"
-	"github.com/vcabbage/unpkg/cmd/unpkg/server"
+	"github.com/vcabbage/go-unpkg/cli"
+	"github.com/vcabbage/go-unpkg/server"
 )
 
 func main() {

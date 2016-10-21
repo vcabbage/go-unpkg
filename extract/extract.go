@@ -9,6 +9,10 @@ import (
 	"strings"
 )
 
+// TGZ extracts tar/gzipped files.
+//
+// NPM puts all files in a package directory. This implementation strips off the
+// package portion.
 func TGZ(r io.Reader, dir string) error {
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err

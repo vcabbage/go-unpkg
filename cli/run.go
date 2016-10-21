@@ -5,29 +5,28 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
-	"path"
 	"path/filepath"
 
-	"github.com/vcabbage/unpkg"
+	"github.com/vcabbage/go-unpkg/npm"
 )
 
 func Run() int {
-	p, err := unpkg.Get(os.Args[1])
-	if err != nil {
+	p := npm.Parse(os.Args[1])
+
+	if err := p.Resolve(); err != nil {
 		fmt.Println(err)
 		return 1
 	}
 
 	fmt.Printf("%#v\n", p)
 
-	if err := unpkg.Download(p, "cache"); err != nil {
+	_, err := p.Download("cache")
+	if err != nil {
 		fmt.Println("Error downloading:", err)
 		return 1
 	}
 
-	dir := filepath.Join("cache", path.Base(p.URL))
-
-	fullpath := filepath.Join(dir, p.Path)
+	fullpath := filepath.Join("cache", p.FilePath())
 	if p.IsDir {
 		files, err := ioutil.ReadDir(fullpath)
 		if err != nil {
