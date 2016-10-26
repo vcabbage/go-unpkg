@@ -11,63 +11,59 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/vcabbage/go-unpkg/extract"
 )
 
+// urlRegex parses [/]name[@version][path] into name, version, path
+var urlRegex = regexp.MustCompile("^([^@/]+)@?([^/]*)?(/.*)?")
+
 type Package struct {
-	Name       string
-	Version    string
-	Path       string
-	IsDir      bool
-	IsResolved bool
-	Hash       string
-	URL        string
+	Name    string
+	Version string
+	Hash    string
+	URL     string
+}
+
+type Parsed struct {
+	Name    string
+	Version string
+	Path    string
 }
 
 // Parse parses a package@version/file/path into a Package
-func Parse(s string) *Package {
-	p := &Package{Version: "latest"} // Default to latest
+func Parse(s string) *Parsed {
+	p := &Parsed{Version: "latest"} // Default to latest
 
-	s = strings.TrimPrefix(s, "/") // Remove leading any leading "/"
-
-	// If there is a trailing slash a directory listing is being requested
-	if s[len(s)-1] == '/' {
-		p.IsDir = true
+	submatches := urlRegex.FindStringSubmatch(s)
+	if len(submatches) < 4 {
+		return p // TODO: error?
 	}
 
-	nameFile := strings.SplitN(s, "/", 2)
-	nameVer := strings.SplitN(nameFile[0], "@", 2)
-
-	p.Name = nameVer[0]
-	if len(nameFile) == 2 {
-		p.Path = nameFile[1]
+	p.Name = submatches[1]
+	if ver := submatches[2]; ver != "" {
+		p.Version = ver
 	}
+	p.Path = submatches[3]
 
-	if len(nameVer) == 2 && nameVer[1] != "" {
-		p.Version = nameVer[1]
-	}
 	return p
 }
 
 // Resolve retrieves package metadata from NPM and update Package
-func (p *Package) Resolve() error {
-	if p.IsResolved {
-		return nil
-	}
-
-	url := "https://registry.npmjs.org/" + p.Name + "/" + p.Version
+func Resolve(name, version string) (*Package, error) {
+	url := "https://registry.npmjs.org/" + name + "/" + version
 	client := &http.Client{Timeout: 10 * time.Second} // TODO: Reuse client
 	resp, err := client.Get(url)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return errors.New("bad response: " + resp.Status)
+		return nil, errors.New("bad response: " + resp.Status)
 	}
 
 	var n struct {
@@ -80,36 +76,36 @@ func (p *Package) Resolve() error {
 		}
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&n); err != nil {
-		return err
+		return nil, err
 	}
+
+	p := &Package{Name: name}
 
 	p.Version = n.Version
 
-	if p.Path == "" && !p.IsDir {
-		switch {
-		case n.Bower != "":
-			p.Path = n.Bower
-		case n.Main != "":
-			p.Path = n.Main
-		default:
-			return errors.New("bower/main requested but not available")
-		}
-	}
+	// if p.Path == "" && Is {
+	// 	switch {
+	// 	case n.Bower != "":
+	// 		p.Path = n.Bower
+	// 	case n.Main != "":
+	// 		p.Path = n.Main
+	// 	default:
+	// 		return errors.New("bower/main requested but not available")
+	// 	}
+	// }
 
 	p.Hash = n.Dist.SHASum
 	p.URL = strings.Replace(n.Dist.TARBall, "http://", "https://", 1) // Use HTTPS
 
-	p.IsResolved = true
-
-	return nil
+	return p, nil
 }
 
 // Download downloads and extracts the package from NPM into dest.
 //
 // If the hash does not match the metadata from NPM the downloaded file is deleted
 // and and error is returned.
-func (p *Package) Download(dest string) (string, error) {
-	name := path.Base(p.URL)
+func Download(url, hash, dest string) (string, error) {
+	name := path.Base(url)
 	dir := filepath.Join(dest, name[:len(name)-len(filepath.Ext(name))])
 
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
@@ -119,7 +115,7 @@ func (p *Package) Download(dest string) (string, error) {
 		return "", nil
 	}
 
-	resp, err := http.Get(p.URL)
+	resp, err := http.Get(url)
 	if err != nil {
 		return "", err
 	}
@@ -139,10 +135,10 @@ func (p *Package) Download(dest string) (string, error) {
 		return "", err
 	}
 
-	if hash := hex.EncodeToString(hasher.Sum(nil)); hash != p.Hash {
+	if dHash := hex.EncodeToString(hasher.Sum(nil)); dHash != hash {
 		fmt.Println("Hashes differ :(")
+		fmt.Println(dHash)
 		fmt.Println(hash)
-		fmt.Println(p.Hash)
 		if err := os.RemoveAll(dir); err != nil {
 			fmt.Println("error removing file:", err)
 		}
@@ -151,23 +147,8 @@ func (p *Package) Download(dest string) (string, error) {
 	return dir, nil
 }
 
-// UnpkgURL returns the relative URL for this package for an unpkg server.
-func (p *Package) UnpkgURL() string {
-	s := "/" + p.Name
-	if p.Version != "" {
-		s += "@" + p.Version
-	}
-	if p.Path != "" {
-		s += "/" + p.Path
-	} else if p.IsDir {
-		s += "/"
-	}
-
-	return s
-}
-
-// FilePath returns the Path relative the the dest directory after
+// DownloadPath returns the Path relative the the dest directory after
 // downloading the Package with Download.
-func (p *Package) FilePath() string {
-	return filepath.Join(p.Name+"-"+p.Version, p.Path)
+func (p *Package) DownloadPath(dir, path string) string {
+	return filepath.Join(dir, p.Name+"-"+p.Version, path)
 }

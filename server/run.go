@@ -6,11 +6,11 @@ import (
 	"net/http"
 	"os"
 	"path"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/vcabbage/go-unpkg/npm"
 
 	"os/signal"
 
@@ -82,25 +82,33 @@ type handler struct {
 
 // ServeHTTP handles each request to the server in a seperate goroutine
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	pkg := strings.TrimPrefix(r.URL.Path, "/") // Trim starting slash
-	log.Printf("New Request for %q\n", pkg)
-	Metrics.requests.WithLabelValues(pkg).Add(1)
+	urlPath := r.URL.Path // Trim starting slash
+	log.Printf("New Request for %q\n", urlPath)
+	Metrics.requests.WithLabelValues(urlPath).Add(1)
 
-	// Get the package from the cache
-	p, err := h.c.getPackage(pkg)
-	if err == errVersionChanged {
-		// If the version was changed from what was requested, send a redirect
-		http.Redirect(w, r, p.UnpkgURL(), http.StatusTemporaryRedirect)
-		return
-	}
+	parsed := npm.Parse(urlPath)
+	path := parsed.Path
+
+	// Get the package metadata from the cache
+	pkg, err := h.c.getPackage(parsed.Name, parsed.Version)
 	if err != nil {
-		log.Println("Error retriving package from cache:", err)
-		// TODO: Don't pass the raw error through
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		// Not in cache
+		pkg, err = npm.Resolve(parsed.Name, parsed.Version)
+		if err != nil {
+			log.Println("Error resolving package:", err)
+			// TODO: Don't pass the raw error through
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		h.c.addPackage(pkg, parsed.Version)
+	}
+	if pkg.Version != parsed.Version {
+		// If the version changed from what was requested, send a redirect
+		http.Redirect(w, r, unpkgURL(pkg.Name, pkg.Version, path), http.StatusTemporaryRedirect)
 		return
 	}
 
-	fullpath := filepath.Join(h.cacheDir, p.FilePath())
+	fullpath := pkg.DownloadPath(h.cacheDir, path)
 
 	// Try to send from file cache
 	if tryFileCache(w, r, fullpath) {
@@ -113,16 +121,16 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	log.Printf("%q not found in file cache, downloading...\n", fullpath)
 
 	// Use singleflight to supress downloading the same package concurrently
-	_, err, _ = h.sf.Do(p.URL, func() (interface{}, error) {
-		return p.Download(h.cacheDir)
+	_, err, _ = h.sf.Do(pkg.URL, func() (interface{}, error) {
+		return npm.Download(pkg.Name, pkg.Version, h.cacheDir)
 	})
 	if err != nil {
-		log.Printf("Error downloading %q: %v\n", p.URL, err)
+		log.Printf("Error downloading %q: %v\n", pkg.URL, err)
 		// TODO: Don't pass the raw error through
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	log.Printf("%q %s download complete\n", p.Name, p.Version)
+	log.Printf("%q %s download complete\n", pkg.Name, pkg.Version)
 
 	serveFile(w, r, fullpath)
 }
@@ -150,4 +158,15 @@ func tryFileCache(w http.ResponseWriter, r *http.Request, p string) bool {
 
 	serveFile(w, r, p)
 	return true
+}
+
+// unpkgURL returns the relative URL for this package for an unpkg server.
+func unpkgURL(name, version, path string) string {
+	s := "/" + name
+	if version != "" {
+		s += "@" + version
+	}
+	s += path
+
+	return s
 }

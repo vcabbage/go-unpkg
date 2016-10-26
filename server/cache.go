@@ -45,42 +45,24 @@ func newCache(timeout time.Duration) *cache {
 	return c
 }
 
-// errVersionChanged is used to indicate thate the version changed after resolving the package
-var errVersionChanged = errors.New("version changed")
-
 // getPackage tries retrieving packages from cache, failing that it will resolve the package
-func (c *cache) getPackage(pkg string) (npm.Package, error) {
-	p := npm.Parse(pkg)
-
+func (c *cache) getPackage(name, version string) (*npm.Package, error) {
+	key := name + version
 	c.resolvedMu.RLock()
-	cached, ok := c.resolvedPkgs[p.Name+p.Version]
+	cached, ok := c.resolvedPkgs[key]
 	c.resolvedMu.RUnlock()
 	if ok {
-		cached.Path = p.Path
-		cached.IsDir = p.IsDir
-		return cached, nil
+		return &cached, nil
 	}
 
 	c.unresolvedMu.RLock()
-	cached, ok = c.unresolvedPkgs[p.Name+p.Version]
+	cached, ok = c.unresolvedPkgs[key]
 	c.unresolvedMu.RUnlock()
 	if ok {
-		cached.Path = p.Path
-		cached.IsDir = p.IsDir
-		return cached, nil
+		return &cached, nil
 	}
 
-	origVer := p.Version
-	if err := p.Resolve(); err != nil {
-		return *p, err
-	}
-	c.addPackage(p, origVer)
-
-	if origVer != p.Version {
-		return *p, errVersionChanged
-	}
-
-	return *p, nil
+	return nil, errors.New("not found")
 }
 
 // addPackage adds a resolved package to the cache. If any unresolvedVersions

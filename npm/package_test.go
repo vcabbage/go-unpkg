@@ -4,31 +4,31 @@ import "testing"
 
 var parseTests = map[string]struct {
 	in   string
-	want Package
+	want Parsed
 }{
 	"name,version,filepath": {
 		in:   "react@15.3.1/dist/react.min.js",
-		want: Package{Name: "react", Version: "15.3.1", Path: "dist/react.min.js"},
+		want: Parsed{Name: "react", Version: "15.3.1", Path: "/dist/react.min.js"},
 	},
 	"name,version,directory": {
 		in:   "react@15.3.1/dist/",
-		want: Package{Name: "react", Version: "15.3.1", Path: "dist/", IsDir: true},
+		want: Parsed{Name: "react", Version: "15.3.1", Path: "/dist/"},
 	},
 	"name,root dir": {
 		in:   "react/",
-		want: Package{Name: "react", Version: "latest", Path: "", IsDir: true},
+		want: Parsed{Name: "react", Version: "latest", Path: "/"},
 	},
 	"name only": {
 		in:   "react",
-		want: Package{Name: "react", Version: "latest", Path: ""},
+		want: Parsed{Name: "react", Version: "latest", Path: ""},
 	},
 	"name,bad version,filepath": {
 		in:   "react@/dist/react.min.js",
-		want: Package{Name: "react", Version: "latest", Path: "dist/react.min.js"},
+		want: Parsed{Name: "react", Version: "latest", Path: "/dist/react.min.js"},
 	},
 	"name,filepath": {
 		in:   "react/dist/react.min.js",
-		want: Package{Name: "react", Version: "latest", Path: "dist/react.min.js"},
+		want: Parsed{Name: "react", Version: "latest", Path: "/dist/react.min.js"},
 	},
 }
 
