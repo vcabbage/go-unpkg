@@ -2,10 +2,12 @@ package server
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -21,7 +23,7 @@ var Metrics = struct {
 	requests *prometheus.CounterVec
 }{
 	requests: prometheus.NewCounterVec(prometheus.CounterOpts{
-		Name: "unpkg_requests_count",
+		Name: "unpkg_requests_total",
 		Help: "Count of requested packages",
 	}, []string{"package"}),
 }
@@ -86,14 +88,20 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	log.Printf("New Request for %q\n", urlPath)
 	Metrics.requests.WithLabelValues(urlPath).Add(1)
 
-	parsed := npm.Parse(urlPath)
-	path := parsed.Path
+	parsed, err := parseURL(urlPath)
+	if err != nil {
+		log.Println("Error parsing URL:", err)
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	fmt.Println(parsed)
 
 	// Get the package metadata from the cache
 	pkg, err := h.c.getPackage(parsed.Name, parsed.Version)
 	if err != nil {
 		// Not in cache
-		pkg, err = npm.Resolve(parsed.Name, parsed.Version)
+		pkg, err = npm.GetMetadata(parsed.Name, parsed.Version)
 		if err != nil {
 			log.Println("Error resolving package:", err)
 			// TODO: Don't pass the raw error through
@@ -104,11 +112,26 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if pkg.Version != parsed.Version {
 		// If the version changed from what was requested, send a redirect
-		http.Redirect(w, r, unpkgURL(pkg.Name, pkg.Version, path), http.StatusTemporaryRedirect)
+		http.Redirect(w, r, unpkgURL(pkg.Name, pkg.Version, parsed.Path), http.StatusTemporaryRedirect)
 		return
 	}
 
-	fullpath := pkg.DownloadPath(h.cacheDir, path)
+	// Determine path
+	var path string
+	switch {
+	case parsed.Path != "":
+		path = parsed.Path
+	case pkg.Browser != "":
+		path = pkg.Browser
+	case pkg.Main != "":
+		path = pkg.Main
+	default:
+		http.Error(w, "browser bundle requested but none specified by package.json", http.StatusNotFound)
+		return
+	}
+
+	pkgDir := filepath.Join(h.cacheDir, pkg.Name+"-"+pkg.Version)
+	fullpath := filepath.Join(pkgDir, path)
 
 	// Try to send from file cache
 	if tryFileCache(w, r, fullpath) {
@@ -122,7 +145,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Use singleflight to supress downloading the same package concurrently
 	_, err, _ = h.sf.Do(pkg.URL, func() (interface{}, error) {
-		return npm.Download(pkg.Name, pkg.Version, h.cacheDir)
+		return nil, npm.Download(pkg.URL, pkg.Hash, pkgDir)
 	})
 	if err != nil {
 		log.Printf("Error downloading %q: %v\n", pkg.URL, err)
