@@ -10,27 +10,50 @@ import (
 	"strings"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"os/signal"
 
 	"golang.org/x/sync/singleflight"
 )
+
+var Metrics = struct {
+	requests *prometheus.CounterVec
+}{
+	requests: prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "unpkg_requests_count",
+		Help: "Count of requested packages",
+	}, []string{"package"}),
+}
 
 // Run starts the HTTP server
 //
 // Returns the process exit code for use in a main package
 func Run() int {
 	var (
-		cacheTimeout = flag.Duration("cacheTimeout", 5*time.Minute, "length of time to cache package metadata")
-		listen       = flag.String("listen", "localhost:8080", "Address and port to listen on")
+		cacheDir      = flag.String("cacheDir", "cache", "directory to store cached packages")
+		cacheTimeout  = flag.Duration("cacheTimeout", 5*time.Minute, "length of time to cache package metadata")
+		listen        = flag.String("listen", "localhost:8080", "Address and port to listen on")
+		enableMetrics = flag.Bool("metrics", true, "enable prometheus metric collection")
 	)
 	flag.Parse()
 
 	c := newCache(*cacheTimeout)
 
+	mux := http.NewServeMux()
+
+	mux.Handle("/", &handler{c: c, cacheDir: *cacheDir})
+
+	if *enableMetrics {
+		mux.Handle("/metrics", prometheus.Handler())
+
+		prometheus.MustRegister(Metrics.requests)
+	}
+
 	srv := http.Server{
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 60 * time.Second,
-		Handler:      &handler{c: c, cacheDir: "cache"},
+		Handler:      mux,
 		Addr:         *listen,
 	}
 
@@ -61,6 +84,7 @@ type handler struct {
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	pkg := strings.TrimPrefix(r.URL.Path, "/") // Trim starting slash
 	log.Printf("New Request for %q\n", pkg)
+	Metrics.requests.WithLabelValues(pkg).Add(1)
 
 	// Get the package from the cache
 	p, err := h.c.getPackage(pkg)
