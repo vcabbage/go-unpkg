@@ -19,6 +19,7 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
+// Metrics contains prometheus metrics
 var Metrics = struct {
 	requests *prometheus.CounterVec
 }{
