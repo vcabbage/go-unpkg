@@ -14,6 +14,10 @@ var parseTests = map[string]struct {
 		in:   "react@15.3.1/dist/",
 		want: parsed{Name: "react", Version: "15.3.1", Path: "/dist/"},
 	},
+	"name,pattern version,directory": {
+		in:   "react@^14.0.0/dist/",
+		want: parsed{Name: "react", Version: "^14.0.0", Path: "/dist/"},
+	},
 	"name,root dir": {
 		in:   "react/",
 		want: parsed{Name: "react", Version: "latest", Path: "/"},

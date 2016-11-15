@@ -12,5 +12,5 @@ go get -u -v github.com/vcabbage/go-unpkg
 
 Run
 ```
-$GOPATH/bin/go-unpkg serve [-listen ":80"] [-cacheDir "/tmp/unpkg"]
+$GOPATH/bin/go-unpkg [-listen ":80"] [-cacheDir "/tmp/unpkg"]
 ```
